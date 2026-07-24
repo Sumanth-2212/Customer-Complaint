@@ -1,0 +1,36 @@
+{
+  "summary": "Backend-only iteration_2 testing complete. Created /app/backend/tests/test_iteration_2.py with 15 tests covering the 4 new features (history list with limit, SSE streaming extraction, PDF export, duplicate detector) and regressions. All 15/15 new tests passed, and all 8/8 pre-existing tests in backend_test.py still pass (23/23 total).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_2.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iteration_2_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py extract_stream: for the SSE endpoint, any HTTPException raised during _read_source (415/400/413) is correctly returned as JSON before the StreamingResponse begins — good. The generator swallows all exceptions and emits a data:{type:'error'} frame, so upstream Gemini failures cannot crash the connection.",
+    "server.py duplicate-check: the route path is registered BEFORE the /complaints/{complaint_id} route in the router, so FastAPI matches the literal path first. Verified — 'duplicate-check' does not get interpreted as a complaint_id. Good ordering.",
+    "server.py download_pdf: opens its own SessionLocal() context (does not use the Depends(get_session) dependency). That's fine and avoids leaking a session into a byte response, but it means this endpoint won't be covered by any future request-scoped middleware on get_session. Consistent behaviour, minor design divergence — worth noting.",
+    "extractor.py stream_extraction: _incremental_parse is called on every TextDelta, meaning it re-scans the entire growing buffer each chunk (O(n^2) on buffer length). For typical <2KB JSON outputs this is fine; if outputs ever exceed ~50KB consider throttling parses (e.g. only when a newline arrives).",
+    "extractor.py: the final sweep after StreamDone emits any missed keys with values from _coerce_json — good safety net; in practice the JSON parse during streaming often already emits everything, but the fallback ensures the client always sees all 13 keys.",
+    "pdf_export.py: uses datetime.utcnow() which is deprecated in Python 3.12+; prefer datetime.now(timezone.utc). Cosmetic only."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_2.py (new)"
+  ],
+  "success_rate": {"backend": "100% (23/23)", "frontend": "not tested (skipped per request)"},
+  "test_credentials": "N/A (no auth in this app)",
+  "seed_data_creation": "Iteration_2 test module inserts TEST_ prefixed complaints via /api/complaints/save (batch_number=TEST_B12345 idempotent-reseed, TEST_PDFB1 for PDF test, TEST_REG1 for regression save). Not cleaned up — safe to leave. TEST_B12345 was already seeded by iteration_1.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Two pytest files exist: /app/backend/tests/backend_test.py (iteration_1, 8 tests) and /app/backend/tests/test_iteration_2.py (iteration_2, 15 tests). Both are parallel-safe via pytest-xdist LoadScope. BASE_URL is read from /app/frontend/.env REACT_APP_BACKEND_URL. LLM extraction/streaming requires EMERGENT_LLM_KEY in /app/backend/.env (set). SSE test uses requests with stream=True and iter_content, split on '\\n\\n' to parse 'data: ' frames, capped at 30s. If Gemini quota is exhausted, only test_stream_emits_start_fields_done and test_extract_non_stream_text and test_chat_valid may fail with llm_error frames — check /var/log/supervisor/backend.*.log.",
+  "rca of the issue": "N/A — no issues found."
+}

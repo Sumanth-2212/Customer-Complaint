@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 3 backend testing complete. Added /app/backend/tests/test_iteration_3.py with 16 tests covering severity-summary, duplicate-check totals, evidence CRUD (upload/list/download/delete/415/413/404), recall create+list+status flip, and PDF-grows-after-image. 15/16 iteration_3 pass. 1 CRITICAL failure: /api/complaints/{id}/pdf now returns 500 for ALL complaints (regression) because pdf_export.build_complaint_pdf() does not accept the 'evidence' kwarg that server.py now passes. This also breaks iteration_2's test_pdf_download_after_fresh_save.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/complaints/{id}/pdf",
+        "issue": "TypeError: build_complaint_pdf() got an unexpected keyword argument 'evidence'. server.py:325 calls build_complaint_pdf(data, evidence=evidence) but pdf_export.py:32 signature is 'def build_complaint_pdf(complaint: dict) -> bytes:'. Additionally line 219 inside the function references an undefined variable 'evidence'. Breaks every PDF download.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration_3.py",
+    "/app/test_reports/pytest/iteration_3_results.xml"
+  ],
+  "action_items": [
+    "Fix pdf_export.build_complaint_pdf signature to accept evidence: list[dict] | None = None. This single line fix unblocks both the new 'PDF grows with image' feature AND restores iteration_2's PDF regression test."
+  ],
+  "critical_code_review_comments": [
+    "pdf_export.py: build_complaint_pdf signature (line 32) still reads 'def build_complaint_pdf(complaint: dict) -> bytes:' but the function body (line 219 onward) references the variable 'evidence' and server.py invokes it with evidence=evidence. This is an incomplete edit. Suggested fix: change signature to 'def build_complaint_pdf(complaint: dict, evidence: list[dict] | None = None) -> bytes:' and 'evidence = evidence or []' at the top.",
+    "server.py severity-summary uses PostgreSQL-specific func.date_trunc('day', ...). Works because the app runs on Postgres per backend/.env DATABASE_URL. Fine as-is, but locks the query to Postgres — worth a comment or a dialect guard if SQLite/MySQL is ever considered.",
+    "server.py create_recall: complaint_ids are stored as CSV in a Text column. Silent-skip of non-existent ids is fine, but there is no dedup / no bound on list length. Consider capping or validating unique ints in Pydantic model.",
+    "server.py upload_evidence: file is read fully into memory before size check (data = await file.read(); len(data) > MAX_FILE_BYTES). For 10MB this is acceptable, but a hostile 500MB upload would still be buffered entirely before the 413. Prefer starlette streaming size check (chunked read with running counter) or set request-size limit via middleware.",
+    "server.py delete_evidence: swallows all OSError silently. If the file is missing on disk the DB row is still deleted (fine), but should log at least a warning for observability.",
+    "pdf_export.py: 'from datetime import datetime, timezone' — good (previous datetime.utcnow deprecation flagged in iteration_2 appears fixed here).",
+    "db.py Evidence.storage_path stores the absolute on-disk path in the database. If uploads move to another volume (or a container filesystem rebuild), those rows point at a missing file. Route already returns 410 for that case — acceptable but worth documenting.",
+    "server.py Evidence upload: MIME is trusted from client-provided content_type first, then falls back to mimetypes.guess_type(filename). A .png with content_type='application/pdf' would be stored as pdf but rendered as image in the PDF appendix (or vice-versa). Consider deriving MIME strictly from extension for the appendix inline-image check."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration_3.py (new)"
+  ],
+  "success_rate": {"backend": "94% (15/16 iteration_3); PDF regression fails in iteration_2 too so combined = 37/39 = 95%", "frontend": "not tested (skipped per request)"},
+  "test_credentials": "N/A (no auth in this app)",
+  "seed_data_creation": "test_iteration_3 inserts: TEST_ prefix (TEST_Evidence Co, TEST_QtyCheck, TEST_PDF_Grow) and EV_BATCH_TEST batch. Also creates 1 real Recall row for EV_BATCH_TEST. Not cleaned up per project convention.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Three pytest files: /app/backend/tests/backend_test.py (iter1, 8), /app/backend/tests/test_iteration_2.py (iter2, 15), /app/backend/tests/test_iteration_3.py (iter3, 16). After the PDF fix, expect 16/16 iter3 + 15/15 iter2 + 8/8 iter1 = 39/39. Feature routes verified: /api/complaints/severity-summary (before /{id}, not shadowed), /api/complaints/{id}/evidence (POST/GET/GET file/DELETE with proper 415/413/404), /api/recalls (POST 400 on empty batch; POST 200 flips complaint status to 'Under Recall'; missing complaint_ids silently skipped). duplicate-check now returns total_quantity_affected (int). To reproduce PDF bug: curl <BASE>/api/complaints/1/pdf -> 500; check /var/log/supervisor/backend.err.log for 'build_complaint_pdf() got an unexpected keyword argument evidence'.",
+  "rca of the issue": "server.py:325 was updated to pass 'evidence=evidence' to build_complaint_pdf, and pdf_export.py had an 'Evidence appendix' block appended at line 219 that references an 'evidence' variable, but the function signature at pdf_export.py:32 was NOT updated to include the parameter. Result: every PDF download raises TypeError -> HTTP 500. Reproduction: curl -o /tmp/x.pdf -w '%{http_code}' <BASE>/api/complaints/<any_valid_id>/pdf returns 500. Mitigation: change line 32 to 'def build_complaint_pdf(complaint: dict, evidence: list[dict] | None = None) -> bytes:' and add 'evidence = evidence or []' before use. No other code changes required."
+}
