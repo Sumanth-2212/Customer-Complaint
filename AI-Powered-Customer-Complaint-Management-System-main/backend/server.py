@@ -483,6 +483,12 @@ async def chat_endpoint(req: ChatRequest):
     return ChatResponse(reply=reply)
 
 
+@app.get("/")
+@app.get("/health")
+async def health_check():
+    return {"status": "ok", "service": "complaint-intake-api"}
+
+
 app.include_router(api)
 
 app.add_middleware(

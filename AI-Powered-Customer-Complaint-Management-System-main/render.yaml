@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: complaint-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: complaint-db
+          property: connectionString
+      - key: GROQ_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        value: llama-3.3-70b-versatile
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+databases:
+  - name: complaint-db
+    databaseName: complaints_db
+    user: postgres
+    plan: free
